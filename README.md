@@ -25,10 +25,14 @@ Update a property on a block. `id` is the block's id, `field` the name of a tuna
 
 If `numRets` is `0` there is no return, `1` gives a flag if the value changed - `0` or `1`.
 
-Sending `force` as 1 ensures the value is changed.
+Sending `force` as `1` ensures the value is refreshed even if unchanged.
 
 
 ```
 var value = api.GetProperty(1, id, field);
 ```
 Returns the current value of `field` for the block.
+
+## Models
+The app requires an existing model on the test machine in the shared folder.
+This will need to be copied over as a seperate step after installing from the inernal file server. `C:\Shares\FinancialCanvas\sciurus\Account\CanvasFiles\API Test`
