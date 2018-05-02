@@ -1,58 +1,186 @@
-﻿using Scirius.FinancialCanvas.API;
+﻿using System;
+using FireSharp;
+using FireSharp.Config;
+using FireSharp.EventStreaming;
+
 namespace MatlabApp
 {
     class Program
     {
         static void Main(string[] args)
         {
-            System.Console.WriteLine("api " + System.DateTime.Now);
-            // creating an instance of the API class loads up the environment.
-            // this includes the overhead of the MATLAB runtime.
-            var api = new API();
-            System.Console.WriteLine("load " + System.DateTime.Now);
-            // The api handle is passed into Model to handle working with the model:
-            var model = new Model(api, "API Test", "State (3)");
-            System.Console.WriteLine("set " + System.DateTime.Now);
-            model.UpdateNumber("InitialAssets", 110000000);
-            System.Console.WriteLine("clear " + System.DateTime.Now);
-            // this clears the model from the api, worth calling during shutdown
-            // or if changing the required model.
-            api.Clear();
-            System.Console.WriteLine("done " + System.DateTime.Now);
+            //System.Console.WriteLine("api " + System.DateTime.Now);
+            //// creating an instance of the API class loads up the environment.
+            //// this includes the overhead of the MATLAB runtime.
+            //var api = new API();
+            //System.Console.WriteLine("load " + System.DateTime.Now);
+            //// The api handle is passed into Model to handle working with the model:
+            //var model = new Model(api, "API Test", "State (4)");
+            //System.Console.WriteLine("set " + System.DateTime.Now);
+            //for (int i = 11; i < 15; i++)
+            //{
+            //    System.Console.WriteLine("set to " + i + " " + System.DateTime.Now);
+            //    model.UpdateNumber("InitialAssets", i * 10000000);
+            //}
+            //System.Console.WriteLine("clear " + System.DateTime.Now);
+            //// this clears the model from the api, worth calling during shutdown
+            //// or if changing the required model.
+            //api.Clear();
+            //System.Console.WriteLine("done " + System.DateTime.Now);
+            var listener = new FirebaseListener();
+            listener.Listen();
+            Console.WriteLine("Listening for changes");
+            Console.WriteLine("Press Q to quit");
+            var waiting = true;
+            while (waiting)
+            {
+                var key = Console.ReadKey();
+                waiting = !(key.Key == ConsoleKey.Q);
+            }
+            Console.WriteLine("Exit");
+            listener = null;
         }
     }
 
-    internal class Model
+    internal class FirebaseListener
     {
-        /// <summary>keep the api instance</summary>
-        private API api;
-
-        /// <summary>
-        /// Create the model
-        /// Real world this would need to be a singleton as API supports only a single state open at a time.
-        /// </summary>
-        /// <param name="api"></param>
-        /// <param name="name"></param>
-        /// <param name="state"></param>
-        internal Model(API api, string name, string state)
+        protected const string FIREBASE_PATH = "https://fc-dashboard.firebaseio.com/";
+        protected const string FIREBASE_SECRET = "ZMbxpDIqZSVfCoTLVss1jafW0JhYQF2ejHw65wT7";
+        private FirebaseClient client;
+        private string name;
+        private string state;
+        private Model modelHandle;
+        private bool updating;
+        internal FirebaseListener()
         {
-            this.api = api;
-            // load state loads a named state within a model.
-            // once loaded other calls will reference the same model.
-            this.api.LoadState(name, state);
+            System.Console.WriteLine("create");
+            var config = new FirebaseConfig
+            {
+                BasePath = FirebaseListener.FIREBASE_PATH,
+                AuthSecret = FirebaseListener.FIREBASE_SECRET
+            };
+            this.modelHandle = new Model();
+            this.client = new FirebaseClient(config);
         }
 
-        internal void UpdateNumber(string field, double value)
+        internal void Listen()
         {
-            // SetProperty updates a tunable property on a single block, identified by id.
-            // in this case -1 references the global properties block.
-            // Call is SetProperty(numReturn, id, tunable name, new value, [force])
-            // a return is available [use numReturn==1] that flags 0/1 if the field changed.
-            // the optional force flag can be set to 1 to force an update.
-            this.api.SetProperty(0, -1, field, value);
+            this.updating = false;
+            this.ListenOnPath(null);
+        }
 
-            // there is similarly GetProperty(numReturn, id, tunable name) usage would be
-            // var x = this.api.GetProperty(0, -1, field) would return as a struture the value of the property.
+        private async void ListenOnPath(string path)
+        {
+            var fullPath = "investible_benchmark/model_params";
+            if (path != null)
+            {
+                fullPath = fullPath + path;
+            }
+            Console.WriteLine("listen " + fullPath);
+            // read everything from Firebase as the base state:
+            var response = await this.client.OnAsync(fullPath,
+                (sender, args, context) => { this.DataInsert(path, args); },
+                (sender, args, context) => { this.DataUpdate(path, args); },
+                (sender, args, context) => { });
+            //response = null;
+        }
+
+        private void DataInsert(string path, ValueAddedEventArgs args)
+        {
+            if (path != null)
+            {
+                return; // already got from earlier call
+            }
+            this.updating = false;
+            Console.Out.WriteLine("INS:" + args.Path + "=" + args.Data);
+            this.ProcessField(args.Path, args.Data);
+        }
+
+        private void DataUpdate(string path, ValueChangedEventArgs args)
+        {
+            this.updating = true;
+            var argPath = path == null ? args.Path : path + args.Path;
+            Console.Out.WriteLine("UPD:" + argPath + "=" +args.Data);
+            this.ProcessField(argPath, args.Data);
+         //   this.GetModel().UpdateNumber("InitialAssets", 1.1e9);
+        }
+
+        private void ProcessField(String path, object value)
+        {
+            System.Console.WriteLine("process");
+            try
+            {
+                path = path.Substring(1); // strip the '/'
+                switch (path)
+                {
+                    case "model":
+                        {
+                            this.name = (string)value;
+                            return;
+                        }
+                    case "state":
+                        {
+                            this.state = (string)value;
+                            return;
+                        }
+                }
+                System.Console.WriteLine("process.model");
+                var model = this.GetModel();
+                model.Updating = this.updating;
+                var parts = path.Split('/');
+                if (parts.Length != 3)
+                {
+                    Console.Error.WriteLine("Ignored field " + path);
+                    return;
+                }
+                var type = parts[0];
+                var block = parts[1];
+                var tunable = parts[2];
+
+                switch (type)
+                {
+                    case "update":
+                        {
+                            Console.WriteLine("process.update");
+                            model.UpdateField(block, tunable, value);
+                            return;
+                        }
+                    case "post":
+                        {
+                            Console.WriteLine("process.post");
+                            model.PostField(block, tunable, value);
+                            return;
+                        }
+                    default:
+                        {
+                            Console.Error.WriteLine("Unhandled field " + path);
+                            return;
+                        }
+                }
+            }
+            catch(Exception ex)
+            {
+                Console.Error.WriteLine("Exception " + ex.Message + '\n' + ex.Source);
+            }
+        }
+        private Model GetModel()
+        {
+            if (this.name == null || this.state == null)
+            {
+                return this.modelHandle;
+            }
+            return this.GetModel(this.name, this.state);
+        }
+
+        private Model GetModel(string model, string state)
+        {
+            if (this.updating && (this.modelHandle.Name != model || 
+                    this.modelHandle.State != state))
+            {
+                Console.WriteLine("GetModel.LoadState");
+                this.modelHandle.LoadState(model, state);
+            }
+            return this.modelHandle;
         }
     }
 }
