@@ -4,14 +4,16 @@ using Scirius.FinancialCanvas;
 
 namespace MatlabApp
 {
-
+    /// <summary>
+    /// Repreents a model
+    /// </summary>
     internal class Model
     {
         /// <summary>keep the api instance</summary>
         private API api;
         private Dictionary<String, Block> updateBlocks; // if a field changes, update the tunables in the block
-        private Dictionary<String, Block> postBlocks; // after an update, all these blocks are updated.
-
+        //private Dictionary<String, Block> postBlocks; // after an update, all these blocks are updated.
+        
         /// <summary>
         /// Create the model
         /// Real world this would need to be a singleton as API supports only a single state open at a time.
@@ -23,7 +25,7 @@ namespace MatlabApp
         {
             this.api = new API();
             this.updateBlocks = new Dictionary<string, Block>();
-            this.postBlocks = new Dictionary<string, Block>();
+            //this.postBlocks = new Dictionary<string, Block>();
         }
 
         internal void LoadState(string name, string state)
@@ -48,28 +50,32 @@ namespace MatlabApp
 
         public string Name { get; private set; }
 
-        internal void PostField(string block, string field, object value)
-        {
-            Block bl;
-            if (!this.postBlocks.TryGetValue(block, out bl))
-            {
-                bl = new Block(block);
-                this.postBlocks[block] = bl;
-            }
-            bl.Set(field, value);
-        }
+        //internal void PostField(string block, string tunable, string field, string value)
+        //{
+        //    Block bl;
+        //    if (!this.postBlocks.TryGetValue(block, out bl))
+        //    {
+        //        bl = new Block(block);
+        //        this.postBlocks[block] = bl;
+        //    }
+        //    bl.Set(tunable, field, value);
+        //}
 
+        internal String PostBlock { get; set; }
         private void PostUpdate()
         {
-            // streaming off
-            foreach (var block in this.postBlocks.Values)
+            if (String.IsNullOrEmpty(this.PostBlock))
             {
+                return;
             }
+            Console.WriteLine("post update");
+            // refresh the external source
+            this.api.Refresh(this.PostBlock, 1);
         }
 
         public string State { get; private set; }
 
-        internal void UpdateField(string block, string field, object value)
+        internal void UpdateField(string block, string tunable, string field, string value)
         {
             Block bl;
             var newBlock = !this.updateBlocks.TryGetValue(block, out bl);
@@ -78,16 +84,15 @@ namespace MatlabApp
                 bl = new Block(block);
                 this.updateBlocks[block] = bl;
             }
-            bl.Set(field, value);
+            bl.Set(tunable, field, value);
             if (!this.Updating)
             {
                 return;
             }
-            // set streaming off
             bl.Update(this.api);
-            // set streaming on
 
             this.PostUpdate();
+            Console.WriteLine("done");
         }
 
         public bool Updating { get; set; }
@@ -95,47 +100,111 @@ namespace MatlabApp
 
     internal class Block
     {
-        private Dictionary<String, object> tunables = new Dictionary<string, object>();
+        private Dictionary<string, Field> tunables = new Dictionary<string, Field>();
 
         internal Block(string name)
         {
             this.Name = name;
         }
-        internal string Name { get; private set; }
+        internal string Name { get; }
 
-        internal object Get(string name)
+        internal string Get(string name)
         {
-            object val;
+            return this.Field(name).Value;
+        }
+        internal void Set(string name, string type, string value)
+        {
+            this.Field(name).Set(type,value);
+        }
+        internal string Type(string name)
+        {
+            return this.Field(name).Type;
+        }
+
+        private Field Field(string name)
+        {
+            Field val;
             if (!this.tunables.TryGetValue(name, out val))
             {
-                return null;
+                val=new Field(name);
+                this.tunables[name] = val;
             }
             return val;
         }
-        internal void Set(string name, object value)
-        {
-            this.tunables[name] = value;
-        }
-
         internal void Update(API api)
         {
-            foreach(var field in this.tunables.Keys)
+            Console.WriteLine("update block " + this.Name);
+            api.SetStream("off");
+            foreach (var field in this.tunables.Keys)
             {
-                var value = this.Get(field);
-                Console.WriteLine("set prop " + this.Name + '.' + field + '=' + value);
-                if (value is string)
-                {
-                    api.SetProperty(0, this.Name, field, (string)value);
-                }
-                else if (value is Int16 || value is Int32)
-                {
-                    api.SetProperty(0, this.Name, field, (Int32)value);
-                }
-                else
-                {
-                    api.SetProperty(0, this.Name, field, (double)value);
-                }
+                Console.WriteLine("-" + field + '=' + this.Get(field));
+                this.Field(field).Update(api, this.Name);
             }
+            api.SetStream("on");
+        }
+    }
+
+    internal class Field
+    {
+        internal Field(string name)
+        {
+            this.Name = name;
+            this.Type = "unknown";
+        }
+        internal String Name { get; }
+        internal String Type { get; set; }
+        internal String Value { get; set; }
+
+        internal void Set(string name, string value)
+        {
+            switch (name)
+            {
+                case "value":
+                    {
+                        this.Value = value;
+                        return;
+                    }
+                case "type":
+                    {
+                        this.Type = value;
+                        return;
+                    }
+            }
+            throw new InvalidOperationException("Cannot set field " + name);
+        }
+        internal void Update(API api, String block)
+        {
+            switch(this.Type)
+            {
+                case "string":
+                    {
+                        api.SetProperty(0, block, this.Name, this.Value);
+                        return;
+                    }
+                case "double":
+                    {
+                        api.SetProperty(0, block, this.Name, Double.Parse(this.Value));
+                        return;
+                    }
+                case "date":
+                    {
+                        // dates must be YYYYMMDD
+                        var date = DateTime.ParseExact(this.Value, "yyyyMMdd",
+                            System.Globalization.CultureInfo.InvariantCulture);
+                        var span = new TimeSpan(date.Ticks);
+                        // C# starts at 01/01/0001, Matlab at 00/00/0000
+                        // so we need to add the extra year and 2 days
+                        var dateNum = span.TotalDays + 367;
+                        api.SetProperty(0, block, this.Name, dateNum);
+                        return;
+                    }
+                case "integer":
+                    {
+                        api.SetProperty(0, block, this.Name, Int32.Parse(this.Value));
+                        return;
+                    }
+            }
+            throw new InvalidOperationException("Cannot set property for type " + this.Type);
         }
     }
 }
