@@ -25,7 +25,6 @@ namespace MatlabApp
         {
             this.api = new API();
             this.updateBlocks = new Dictionary<string, Block>();
-            //this.postBlocks = new Dictionary<string, Block>();
         }
 
         internal void LoadState(string name, string state)

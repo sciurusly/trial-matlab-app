@@ -30,8 +30,8 @@ namespace MatlabApp
                 BasePath = path,
                 AuthSecret = secret
             };
-            this.modelHandle = new Model();
             this.client = new FirebaseClient(config);
+            this.modelHandle = new Model();
         }
 
         internal async void Listen()
