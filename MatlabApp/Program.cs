@@ -34,6 +34,7 @@ namespace MatlabApp
                 waiting = !(key.Key == ConsoleKey.Q);
             }
             Console.WriteLine("Exit");
+            listener.Stop();
             listener = null;
         }
     }
