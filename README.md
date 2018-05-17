@@ -21,17 +21,21 @@ This starts the app running and listens on the provided keys `_callback` subkey.
   "StateFile" : "State (n).state",
   "update" : {
     "JourneyPlan" : {
-      "InitialAssets" : 110000000
+      "InitialAssets" : 110000000,
+      "UseGlobalInitialAsset" : false,
+      "CreditRatingSingle" : "AAA",
+      "CreditRatingMulti" : ["Gilt", "AA"]
     }
   }
 }
 ```
 
-The fields `FolderName`, `SourceBlock` and `StateFile` should be the same values as those provided in the `Status` block, this allows the same model to be updated.
+The fields `FolderName`, `SourceBlock` and `StateFile` should be the same values as those provided in the `Source` block, this allows the same model to be updated.
 
 The keys inside `update` and the value of `SourceBlock` are the names of blocks within the model.
-With `update.Block Name` multiple fields can be provided. If any fields update then the model is updated with all the values for the block and then the named post block is refreshed for external source. 
+With `update.BlockName` multiple fields can be provided. If any fields update then the model is updated with all the values for the block and then the named post block is refreshed for external source. 
 
+The field `reference` must be updated **after** the others and not as part of a single atomic update.
 ## Life Cycle
 The proposed lifecycle would be:
 
