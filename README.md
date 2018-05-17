@@ -21,10 +21,12 @@ This starts the app running and listens on the provided keys `_callback` subkey.
   "StateFile" : "State (n).state",
   "update" : {
     "JourneyPlan" : {
-      "InitialAssets" : 110000000,
       "UseGlobalInitialAsset" : false,
+      "InitialAssets" : 110000000,
       "CreditRatingSingle" : "AAA",
-      "CreditRatingMulti" : ["Gilt", "AA"]
+      "CreditRatingMulti" : ["Gilt", "AA"],
+      "LiabiltyPremium" : 0.01,
+      "ReturnLabel" : "Return"
     }
   }
 }
