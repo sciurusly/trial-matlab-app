@@ -12,23 +12,41 @@ secret is the secret provided by firebase for the database
 root is the root key in the database.
 
 This starts the app running and listens on the provided keys `_callback` subkey. The expcted structure is:
+
 ```
 {
-  "model" : "Model Name",
-  "post" : "SaveExternal",
-  "state" : "State (n)",
+  "FolderName" : "Model Name",
+  "reference" : "xxxx",
+  "SourceBlock" : "SaveExternal",
+  "StateFile" : "State (n).state",
   "update" : {
     "JourneyPlan" : {
-      "InitialAssets" : {
-        "type" : "double",
-        "value" : 110000000
-      }
+      "InitialAssets" : 110000000
     }
   }
 }
-The keys inside `update` and the value of `post` are the names of blocks within the model.
+```
+
+The fields `FolderName`, `SourceBlock` and `StateFile` should be the same values as those provided in the `Status` block, this allows the same model to be updated.
+
+The keys inside `update` and the value of `SourceBlock` are the names of blocks within the model.
 With `update.Block Name` multiple fields can be provided. If any fields update then the model is updated with all the values for the block and then the named post block is refreshed for external source. 
 
+## Life Cycle
+The proposed lifecycle would be:
+
+1. From a saved state, Canvas writes the details to Firebase.
+The components do not need to be aware of the usage, but they do need to describe themselves.
+So JourneyPlan will include the tunable properties for anything that we may wish to update from studio.
+2. Studio writes the details of what it will allow to be entered to the `_callback` block. This is the are that will be watched and any updates picked up.
+3. User goes into update mode.  This requires that the listener process is active; ** currently out of scope for POC **
+4. Updates are written to the `_callback.update` area.
+5. The listener picks up any updates and uses them to refresh the loaded model.
+6. The listener updates the model state named in firebase with new data fromthe update block
+7. On receiving an updated `reference` the full model is refreshed with the new state.
+8. Ufter updating the model, the named `SourceBlock` block is refreshed, this will cause the new model data to be written to firebase (step 1). As part of the update the entire `_callback` block is deleted.
+
+![Update Cycle](https://github.com/sciurusly/trial-matlab-app/blob/master/update%20cycle%20for%20firebase.png "Update Cycle")
 
 # v0.0
 Trial using the Canvas API within C#
