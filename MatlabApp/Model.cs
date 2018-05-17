@@ -40,6 +40,7 @@ namespace MatlabApp
         public string Name { get; private set; }
 
         internal String PostBlock { get; set; }
+        internal String Reference { get; set; }
 
         private void PostUpdate()
         {
@@ -48,7 +49,12 @@ namespace MatlabApp
                 return;
             }
             Console.WriteLine("post update");
-            // refresh the external source
+            //refresh the external source
+            if (!String.IsNullOrEmpty(this.Reference))
+            {
+                this.api.UpdateParameter("set", this.PostBlock, "Reference", this.Reference);
+                this.api.UpdateParameter("update");
+            }
             this.api.Refresh(this.PostBlock, 1);
         }
 

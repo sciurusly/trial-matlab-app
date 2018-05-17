@@ -77,6 +77,7 @@ namespace MatlabApp
                     try
                     {
                         Console.WriteLine("...update running");
+                        this.modelHandle.Reference = this.lastRefresh;
                         this.modelHandle.Update();
                         this.NotifyDone();
                         while (this.pending != null)
@@ -85,6 +86,7 @@ namespace MatlabApp
                             if (this.pending.Key != "/reference")
                             {
                                 this.lastRefresh = this.pending.Value;
+                                this.modelHandle.Reference = this.lastRefresh;
                                 this.modelHandle.Update();
                                 this.NotifyDone();
                             }
@@ -112,10 +114,9 @@ namespace MatlabApp
             Console.WriteLine("...update ended");
         }
 
-        private async void NotifyDone()
+        private void NotifyDone()
         {
-           // var fullPath = this.root + "/Source/";
-           // await this.client.SetAsync(fullPath, "{reference : " + this.lastRefresh + "}");
+            // nothing to do here
         }
 
         /// <summary>
