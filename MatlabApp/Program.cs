@@ -26,9 +26,9 @@ namespace MatlabApp
             listener.Listen();
             Console.WriteLine("Listening for changes");
             var waiting = true;
+            Console.WriteLine("[Press Q to quit]");
             while (waiting)
             {
-                Console.WriteLine("[Press Q to quit]");
                 var key = Console.ReadKey();
                 Console.WriteLine();
                 waiting = !(key.Key == ConsoleKey.Q);

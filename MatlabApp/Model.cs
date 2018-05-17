@@ -5,7 +5,7 @@ using Scirius.FinancialCanvas;
 namespace MatlabApp
 {
     /// <summary>
-    /// Repreents a model
+    /// Represents a model
     /// </summary>
     internal class Model
     {

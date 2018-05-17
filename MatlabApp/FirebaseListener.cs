@@ -17,6 +17,9 @@ namespace MatlabApp
         private Model modelHandle;      // reference to the model
         private string lastRefresh;     // the last refresh
         private Thread updateThread;    // thread for updating the model;
+        private bool updateActive;   // is the model being updated? if so store any changes from firebase
+        private Pending pending;        // simple linked list of pending changes.
+        private Object _lock = new Object();
         /// <summary>
         /// Create a firebase listener
         /// </summary>
@@ -71,11 +74,48 @@ namespace MatlabApp
                 this.updateWait.WaitOne();
                 if (this.running)
                 {
-                    Console.WriteLine("...update running");
-                    this.modelHandle.Update();
+                    try
+                    {
+                        Console.WriteLine("...update running");
+                        this.modelHandle.Update();
+                        this.NotifyDone();
+                        while (this.pending != null)
+                        {
+                            // any updates received
+                            if (this.pending.Key != "/reference")
+                            {
+                                this.lastRefresh = this.pending.Value;
+                                this.modelHandle.Update();
+                                this.NotifyDone();
+                            }
+                            else
+                            {
+                                this.UpdateField(this.pending.Key, this.pending.Value);
+                            }
+                            this.pending = this.pending.Next;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.Error.WriteLine("Exception " + ex.Message + '\n' + ex.Source);
+                    }
+                    finally
+                    {
+                        lock (this._lock)
+                        {
+                            this.updateActive = false;
+                            this.pending = null;
+                        }
+                    }
                 }
             }
             Console.WriteLine("...update ended");
+        }
+
+        private async void NotifyDone()
+        {
+           // var fullPath = this.root + "/Source/";
+           // await this.client.SetAsync(fullPath, "{reference : " + this.lastRefresh + "}");
         }
 
         /// <summary>
@@ -105,37 +145,59 @@ namespace MatlabApp
         /// <param name="value">the string value of the data</param>
         private void ProcessField(string path, string value)
         {
-            Console.WriteLine("ProcessField " + path + " = " + value);
+            lock (this._lock)
+            {
+                if (this.updateActive)
+                {
+                    var p = new Pending(path, value);
+                    if (this.pending == null)
+                    {
+                        this.pending = p;
+                    }
+                    else
+                    {
+                        this.pending.Add(p);
+                    }
+                    return;
+                }
+                this.UpdateField(path, value);
+            }
+        }
+
+        private void UpdateField(string path, string value)
+        {
+
+            Console.WriteLine("UpdateField " + path + " = " + value);
             try
             {
 
                 switch (path)
                 {
-                    case "/model":
+                    case "/FolderName":
                         {
                             this.name = value;
                             this.GetModel(); // make sure it's loaded
                             return;
                         }
-                    case "/state":
+                    case "/StateFile":
                         {
                             this.state = value;
                             this.GetModel(); // make sure it's loaded
                             return;
                         }
-                    case "/post":
+                    case "/SourceBlock":
                         {
                             this.GetModel().PostBlock = value;
                             return;
                         }
-                    case "/refresh":
+                    case "/reference":
                         {
-                            if (this.lastRefresh != null && this.lastRefresh != value)
+                            if (this.lastRefresh != value)
                             {
                                 // notify we're ready
                                 this.updateWait.Set();
+                                this.lastRefresh = value;
                             }
-                            this.lastRefresh = value;
                             return;
                         }
                 }
@@ -177,4 +239,29 @@ namespace MatlabApp
             return this.modelHandle;
         }
     }
+
+    internal class Pending
+    {
+        internal Pending(string key, string value)
+        {
+            this.Key = key;
+            this.Value = value;
+        }
+
+        internal void Add(Pending add)
+        {
+            if (this.Next == null)
+            {
+                this.Next = add;
+            }
+            else
+            {
+                this.Next.Add(add);
+            }
+        }
+        internal string Key { get; set; }
+        internal string Value { get; set; }
+        internal Pending Next { get; set; }
+    }
+
 }
