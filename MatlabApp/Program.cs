@@ -23,19 +23,30 @@ namespace MatlabApp
             var secret = args[1];
             var root = args[2];
             var listener = new FirebaseListener(path, secret, root);
-            listener.Listen();
-            Console.WriteLine("Listening for changes");
-            var waiting = true;
-            Console.WriteLine("[Press Q to quit]");
-            while (waiting)
+            try
             {
-                var key = Console.ReadKey();
-                Console.WriteLine();
-                waiting = !(key.Key == ConsoleKey.Q);
+                listener.Listen();
+                Console.WriteLine("Listening for changes");
+                var waiting = true;
+                Console.WriteLine("[Press Q to quit]");
+                while (waiting)
+                {
+                    var key = Console.ReadKey();
+                    Console.WriteLine();
+                    waiting = !(key.Key == ConsoleKey.Q);
+                }
             }
-            Console.WriteLine("Exit");
-            listener.Stop();
-            listener = null;
+            catch (Exception EX)
+            {
+                Console.WriteLine("Error in listener");
+                Console.WriteLine(EX.Message);
+            }
+            finally
+            {
+                Console.WriteLine("Exit");
+                listener.Stop();
+                listener = null;
+            }
         }
     }
 }
