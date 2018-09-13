@@ -8,16 +8,28 @@ namespace MatlabApp
 {
     internal class FirebaseListener
     {
+        private static readonly string CANVAS= "/_canvas";
+        private static readonly string CANVAS_TWOWAY = CANVAS + "/twoway";
+        private static readonly string CANVAS_ERRORS = CANVAS + "/errors";
+        private static readonly string STUDIO = "/_studio";
+        private static readonly string STUDIO_CALLBACK = STUDIO + "/callback";
+
+        private static readonly int WAIT_MILLISECONDS = 250;
+        private static readonly int WAIT_TICKDOWN = 50;
+
         private FirebaseClient client;  // firebase client db
         private bool running;           // flag that the process is running
         private EventWaitHandle updateWait; // wait notify
-        private string root;            // the root key within the db
+        private bool updateAll;         // flag to update all dashboards
         private string name;            // name of model to load
         private string state;           // state for model
         private Model modelHandle;      // reference to the model
         private string lastRefresh;     // the last refresh
         private Thread updateThread;    // thread for updating the model;
-        private bool updateActive;   // is the model being updated? if so store any changes from firebase
+
+        private int waitCount = 0;      // tick down when an update arrives
+        private bool updateActive;      // is the model being updated? if so store any changes from firebase
+        private bool resetActive;       // is the model being reset? if so store any changes from firebase
         private Pending pending;        // simple linked list of pending changes.
         private Object _lock = new Object();
         /// <summary>
@@ -25,19 +37,19 @@ namespace MatlabApp
         /// </summary>
         /// <param name="path"></param>
         /// <param name="secret"></param>
-        /// <param name="root"></param>
-        internal FirebaseListener(string name, string secret, string root)
+        internal FirebaseListener(string name, string secret, bool updateAll)
         {
-            System.Console.WriteLine("create");
+            System.Console.WriteLine("create listener for " + name);
             var path = "https://" + name + ".firebaseio.com/";
-            this.root = root;
             var config = new FirebaseConfig
             {
                 BasePath = path,
                 AuthSecret = secret
             };
+            this.updateAll = updateAll;
+
             System.Console.WriteLine("... model");
-            this.modelHandle = new Model();
+            this.modelHandle = new Model(this.updateAll);
             System.Console.WriteLine("... firebase");
             this.client = new FirebaseClient(config);
             System.Console.WriteLine("... handler");
@@ -49,22 +61,43 @@ namespace MatlabApp
 
         internal async void Listen()
         {
-            var fullPath = this.root + "/_callback";
-            Console.WriteLine("listen " + fullPath);
+            Console.WriteLine("listen on " +  STUDIO_CALLBACK);
             // read everything from Firebase as the base state:
-            var response = await this.client.OnAsync(fullPath,
+            var response = await this.client.OnAsync(STUDIO_CALLBACK,
                 (sender, args, context) => { this.DataInsert(args); },
                 (sender, args, context) => { this.DataUpdate(args); },
                 (sender, args, context) => { });
+            this.NotifyFirebase(CANVAS_TWOWAY, true);
+        }
+
+
+        private void SetFlag(bool update, bool reset)
+        {
+            lock (this._lock)
+            {
+                this.updateActive = update;
+                if (!this.updateActive)
+                {
+                    this.pending = null;
+                }
+                this.resetActive = reset;
+
+                if (update || reset)
+                {
+                    this.waitCount = WAIT_MILLISECONDS;
+                }
+            }
         }
 
         internal void Stop()
         {
             this.running = false;
+            this.NotifyFirebase(CANVAS_TWOWAY, false);
+            this.client = null;
             this.updateWait.Set();
         }
 
-        // thread hadnler to update the model.
+        // thread handler to update the model.
         internal void StartUpdateThread()
         {
             Console.WriteLine("Start update thread");
@@ -72,45 +105,83 @@ namespace MatlabApp
             {
                 Console.WriteLine("...update waiting");
                 this.updateWait.WaitOne();
+
+                var ticks = 0;
+                while (this.running && this.waitCount > 0)
+                {
+                    if (ticks % 5 == 0)
+                    {
+                        Console.WriteLine("  waiting...");
+                    }
+                    ticks++;
+
+                    this.waitCount-=WAIT_TICKDOWN;
+                    this.updateWait.WaitOne(WAIT_TICKDOWN);
+                }
                 if (this.running)
                 {
+                    Console.WriteLine("  updating...");
                     try
                     {
-                        Console.WriteLine("...update running");
-                        this.modelHandle.Reference = this.lastRefresh;
-                        this.modelHandle.Update();
-                        this.NotifyDone();
-                        while (this.pending != null)
+                        if (this.resetActive)
                         {
-                            // any updates received
-                            if (this.pending.Key != "/reference")
-                            {
-                                this.lastRefresh = this.pending.Value;
-                                this.modelHandle.Reference = this.lastRefresh;
-                                this.modelHandle.Update();
-                                this.NotifyDone();
-                            }
-                            else
-                            {
-                                this.UpdateField(this.pending.Key, this.pending.Value);
-                            }
-                            this.pending = this.pending.Next;
+                            this.RunReset();
+                        }
+                        if (this.updateActive)
+                        {
+                            this.RunUpdate();
                         }
                     }
                     catch (Exception ex)
                     {
-                        Console.Error.WriteLine("Exception " + ex.Message + '\n' + ex.Source);
+                        this.NotifyException("Update Model", ex);
                     }
                     finally
                     {
-                        lock (this._lock)
-                        {
-                            this.updateActive = false;
-                            this.pending = null;
-                        }
+                        this.SetFlag(false, false);
                     }
                 }
             }
+        }
+
+        private void RunNotify()
+        {
+            this.NotifyFirebase(STUDIO_CALLBACK, null);
+            this.NotifyFirebase(CANVAS_ERRORS, this.modelHandle.Status);
+        }
+
+        private void RunReset()
+        {
+            Console.WriteLine("...reset running");
+            this.GetModel().Reset();
+            this.RunNotify();
+            this.NotifyFirebase("_studio", null);
+            Console.WriteLine("...reset complete");
+        }
+
+        private void RunUpdate()
+        {
+            Console.WriteLine("...update running");
+            this.modelHandle.Reference = this.lastRefresh;
+            this.modelHandle.Update(false);
+            this.NotifyDone();
+            while (this.pending != null)
+            {
+                // any updates received
+                if (this.pending.Key != "/reference")
+                {
+                    this.lastRefresh = this.pending.Value;
+                    this.modelHandle.Reference = this.lastRefresh;
+                    this.modelHandle.Update(false);
+                }
+                else
+                {
+                    this.UpdateField(this.pending.Key, this.pending.Value);
+                }
+                this.NotifyDone();
+                this.pending = this.pending.Next;
+            }
+            this.RunNotify();
             Console.WriteLine("...update ended");
         }
 
@@ -120,7 +191,7 @@ namespace MatlabApp
         }
 
         /// <summary>
-        /// Handle a datat insert
+        /// Handle a data insert
         /// </summary>
         /// <param name="args">even holding data to insert</param>
         private void DataInsert(ValueAddedEventArgs args)
@@ -148,7 +219,7 @@ namespace MatlabApp
         {
             lock (this._lock)
             {
-                if (this.updateActive)
+                if (this.IsUpdateActive)
                 {
                     var p = new Pending(path, value);
                     if (this.pending == null)
@@ -168,7 +239,7 @@ namespace MatlabApp
         private void UpdateField(string path, string value)
         {
 
-            Console.WriteLine("UpdateField " + path + " = " + value);
+            Console.WriteLine("  UpdateField " + path + " = " + value);
             try
             {
 
@@ -196,6 +267,19 @@ namespace MatlabApp
                             if (this.lastRefresh != value)
                             {
                                 // notify we're ready
+                                this.SetFlag(true, false);
+                                this.updateWait.Set();
+                                this.lastRefresh = value;
+                            }
+                            return;
+                        }
+                    case "/reset":
+                        {
+                            var isSet = 0;
+                            Int32.TryParse(value, out isSet);
+                            if (isSet != 0)
+                            {
+                                this.SetFlag(true, true);
                                 this.updateWait.Set();
                                 this.lastRefresh = value;
                             }
@@ -205,7 +289,7 @@ namespace MatlabApp
                 var parts = path.Substring(1).Split('/');
                 if (parts.Length != 3 || parts[0] != "update")
                 {
-                    Console.Error.WriteLine("Unhandled field " + path);
+                    Console.Error.WriteLine("*** EXCEPTION Unhandled field " + path);
                     return;
                 }
                 var block = parts[1];
@@ -213,10 +297,12 @@ namespace MatlabApp
 
                 var model = this.GetModel();
                 model.UpdateField(block, tunable, value);
+                this.waitCount = WAIT_MILLISECONDS;
+                this.updateWait.Set();
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine("Exception " + ex.Message + '\n' + ex.Source);
+                this.NotifyException("UpdateField", ex);
             }
         }
 
@@ -238,6 +324,67 @@ namespace MatlabApp
                 this.modelHandle.LoadState(this.name, this.state);
             }
             return this.modelHandle;
+        }
+
+        private bool IsResetActive
+        {
+            get
+            {
+                lock (this._lock)
+                {
+                    return this.resetActive;
+                }
+            }
+        }
+
+        private bool IsUpdateActive
+        {
+            get
+            {
+                lock (this._lock)
+                {
+                    return this.updateActive && this.waitCount == 0;
+                }
+            }
+        }
+
+        private void NotifyFirebase(string path, Object value)
+        {
+            try
+            {
+                if (value == null)
+                {
+                    this.client.Set(path, "{}");
+                }
+                else
+                {
+                    this.client.Set(path, value);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine("*** EXCEPTION " + ex.Message + '\n' + ex.Source);
+            }
+        }
+
+        /// <summary>
+        /// Notify an exception in the listener
+        /// </summary>
+        /// Write a message to the consol and, if available, back to firebase
+        /// <param name="source"></param>
+        /// <param name="ex"></param>
+        private void NotifyException(string source, Exception ex)
+        {
+            var msg = source + '\n' + 
+                ex.Message + '\n' + 
+                ex.Source;
+
+            Console.Error.WriteLine("*** EXCEPTION " + msg);
+            //if (this.client == null)
+            //{
+            //    return;
+            //}
+            //this.NotifyFirebase("_error", msg);
         }
     }
 

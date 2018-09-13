@@ -15,7 +15,7 @@ namespace MatlabApp
 
         // do we need to update the loaded state file?
         private bool updateState;
-
+        private bool updateAll;         // flag to update all dashboards
         /// <summary>
         /// Create the model
         /// Real world this would need to be a singleton as API supports only a single state open at a time.
@@ -23,11 +23,12 @@ namespace MatlabApp
         /// <param name="api"></param>
         /// <param name="name"></param>
         /// <param name="state"></param>
-        internal Model()
+        internal Model(bool updateAll)
         {
             this.api = new API();
             this.updateBlocks = new Dictionary<string, Block>();
             this.updateState = false;
+            this.updateAll = updateAll;
         }
 
         internal void LoadState(string name, string state)
@@ -42,20 +43,67 @@ namespace MatlabApp
         internal String PostBlock { get; set; }
         internal String Reference { get; set; }
 
-        private void PostUpdate()
+        private void PostUpdate(bool force)
         {
-            if (String.IsNullOrEmpty(this.PostBlock))
+
+            if (!this.updateAll && String.IsNullOrEmpty(this.PostBlock))
             {
                 return;
             }
-            Console.WriteLine("post update");
+            Console.WriteLine("      post update");
             //refresh the external source
             if (!String.IsNullOrEmpty(this.Reference))
             {
-                this.api.UpdateParameter("set", this.PostBlock, "Reference", this.Reference);
-                this.api.UpdateParameter("update");
+                this.api.Update("set", this.PostBlock, "Reference", this.Reference);
+                this.api.Update("update");
             }
-            this.api.Refresh(this.PostBlock, 1);
+            if (this.updateAll)
+            {
+                if (force)
+                {
+                    this.api.Refresh("#SaveExternal", 1);
+                }
+                else
+                {
+                    this.api.Refresh("#SaveExternal", "due");
+                }
+            }
+            else
+            {
+                this.api.Refresh(this.PostBlock, 1);
+            }
+            var status = this.api.Status();
+
+            if (!status.IsEmpty)
+            {
+                this.StatusAdd("something went wrong");
+            }
+            foreach (var bl in this.updateBlocks.Values)
+            {
+                bl.PostUpdate();
+            }
+        }
+
+
+        private void PreUpdate()
+        {
+            // clear status;
+            this.Status = null;
+            Console.WriteLine("      pre update");
+            if (this.updateState)
+            {
+                Console.WriteLine("        LoadState");
+                this.api.LoadState(this.Name, this.State);
+                this.updateState = false;
+            }
+            this.api.Update("clear");
+        }
+
+        internal void Reset()
+        {
+            Console.WriteLine("  State reload");
+            this.updateState = true;
+            this.Update(true);
         }
 
         public string State { get; private set; }
@@ -72,28 +120,42 @@ namespace MatlabApp
             }
             bl.Set(tunable, value);
         }
-        public void Update()
+        public void Update(bool force)
         {
             try
             {
-                Console.WriteLine("Update");
-                if (this.updateState)
-                {
-                    Console.WriteLine("LoadState");
-                    this.api.LoadState(this.Name, this.State);
-                    this.updateState = false;
-                }
-                this.api.UpdateParameter("clear");
+                Console.WriteLine("    Update for " + this.Name + '@' + this.State);
+
+                this.PreUpdate();
                 foreach (var bl in this.updateBlocks.Values)
                 {
                     bl.Update(this.api);
                 }
-                this.api.UpdateParameter("update");
-                this.PostUpdate();
+                this.api.Update("update");
+
+                this.PostUpdate(force);
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine("Exception " + ex.Message + '\n' + ex.Source);
+                Console.Error.WriteLine("*** EXCEPTION " + ex.Message + '\n' + ex.Source);
+                this.StatusAdd("Error updating model");
+            }
+            //this.StatusAdd("Failed!");
+        }
+
+        public string[] Status { get; private set; }
+
+        private void StatusAdd(string message)
+        {
+            if (this.Status == null)
+            {
+                this.Status = new string[] { message };
+            }
+            else
+            {
+                var list = new List<string>(this.Status);
+                list.Add(message);
+                this.Status = list.ToArray();
             }
         }
     }
@@ -130,12 +192,21 @@ namespace MatlabApp
         }
         internal void Update(API api)
         {
-            Console.WriteLine("update block " + this.Name);
+            if (this.tunables.Count == 0)
+            {
+                return;
+            }
+            Console.WriteLine("      update block " + this.Name);
             foreach (var field in this.tunables.Keys)
             {
-                Console.WriteLine("-" + field + '=' + this.Get(field));
+                Console.WriteLine("        " + field + '=' + this.Get(field));
                 this.Field(field).Update(api, this.Name);
             }
+        }
+
+        internal void PostUpdate()
+        {
+            this.tunables.Clear();
         }
     }
 
@@ -154,7 +225,7 @@ namespace MatlabApp
         }
         internal void Update(API api, String block)
         {
-            api.UpdateParameter("set", block, this.Name, this.Value);
+            api.Update("set", block, this.Name, this.Value);
         }
     }
 }
