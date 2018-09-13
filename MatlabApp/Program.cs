@@ -14,15 +14,19 @@ namespace MatlabApp
         /// <param name="args">Requires three arguments for db, secret and root</param>
         static void Main(string[] args)
         {
-            if (args.Length != 3)
+            if (args.Length < 2 || args.Length > 3)
             {
-                Console.WriteLine("Invalid command arguments: path secret root");
+                Console.WriteLine("Invalid command arguments: path secret [all]");
+                Console.WriteLine("  path - the name of the firebase database; eg 'dev-financial-canvas-studio'");
+                Console.WriteLine("  secret - the authentication secret for the firebase database");
+                Console.WriteLine("  all - 'all'/'current' if the api should update all dashboards or the current one; default is 'all'");
                 return;
             }
             var path = args[0];
             var secret = args[1];
-            var root = args[2];
-            var listener = new FirebaseListener(path, secret, root);
+            var updateAll = (args.Length <= 3 || args[2] == "all");
+
+            var listener = new FirebaseListener(path, secret, updateAll);
             try
             {
                 listener.Listen();
@@ -36,10 +40,10 @@ namespace MatlabApp
                     waiting = !(key.Key == ConsoleKey.Q);
                 }
             }
-            catch (Exception EX)
+            catch (Exception ex)
             {
-                Console.WriteLine("Error in listener");
-                Console.WriteLine(EX.Message);
+                Console.Error.WriteLine("Error in listener");
+                Console.Error.WriteLine(ex.Message);
             }
             finally
             {
