@@ -8,11 +8,14 @@ namespace MatlabApp
 {
     internal class FirebaseListener
     {
-        private static readonly string CANVAS= "/_canvas";
+        private static readonly string CANVAS = "/_canvas";
+        private static readonly string CANVAS_LISTENING = CANVAS + "/listening";
         private static readonly string CANVAS_TWOWAY = CANVAS + "/twoway";
         private static readonly string CANVAS_ERRORS = CANVAS + "/errors";
         private static readonly string STUDIO = "/_studio";
         private static readonly string STUDIO_CALLBACK = STUDIO + "/callback";
+
+        private static readonly int WAIT_HEARTBEAT = 60000;
 
         private static readonly int WAIT_MILLISECONDS = 250;
         private static readonly int WAIT_TICKDOWN = 50;
@@ -26,6 +29,9 @@ namespace MatlabApp
         private Model modelHandle;      // reference to the model
         private string lastRefresh;     // the last refresh
         private Thread updateThread;    // thread for updating the model;
+
+        private EventWaitHandle heartbeatWait;  // wait for heartbeat
+        private Thread heartbeatThread;         // thread for updating heartbeat;
 
         private int waitCount = 0;      // tick down when an update arrives
         private bool updateActive;      // is the model being updated? if so store any changes from firebase
@@ -55,8 +61,11 @@ namespace MatlabApp
             System.Console.WriteLine("... handler");
             this.updateWait = new AutoResetEvent(false);
             this.updateThread = new Thread(StartUpdateThread);
+            this.heartbeatWait = new AutoResetEvent(false);
+            this.heartbeatThread = new Thread(StartHeartbeatThread);
             this.running = true;
             this.updateThread.Start();
+            this.heartbeatThread.Start();
         }
 
         internal async void Listen()
@@ -67,7 +76,7 @@ namespace MatlabApp
                 (sender, args, context) => { this.DataInsert(args); },
                 (sender, args, context) => { this.DataUpdate(args); },
                 (sender, args, context) => { });
-            this.NotifyFirebase(CANVAS_TWOWAY, true);
+            this.client.Set(CANVAS_TWOWAY, true);
         }
 
 
@@ -92,15 +101,29 @@ namespace MatlabApp
         internal void Stop()
         {
             this.running = false;
-            this.NotifyFirebase(CANVAS_TWOWAY, false);
+            this.client.Set(CANVAS_TWOWAY, false);
             this.client = null;
             this.updateWait.Set();
+            this.heartbeatWait.Set();
         }
 
+        internal void StartHeartbeatThread()
+        {
+            Console.WriteLine("Start heartbeat thread");
+            while (this.running)
+            {
+                var heartbeat = DateTime.Now; // DateTime.Now.ToString("yyyyMMddTHHmmsszzz");
+                Console.WriteLine("...heartbeat " + heartbeat);
+                this.NotifyFirebase(CANVAS_LISTENING, heartbeat);
+                this.heartbeatWait.WaitOne(WAIT_HEARTBEAT);
+            }
+            Console.WriteLine("End heartbeat thread");
+        }
         // thread handler to update the model.
         internal void StartUpdateThread()
         {
             Console.WriteLine("Start update thread");
+            this.NotifyFirebase(CANVAS_TWOWAY, true);
             while (this.running)
             {
                 Console.WriteLine("...update waiting");
@@ -142,6 +165,8 @@ namespace MatlabApp
                     }
                 }
             }
+            this.NotifyFirebase(CANVAS_TWOWAY, false);
+            Console.WriteLine("End update thread");
         }
 
         private void RunNotify()
@@ -348,22 +373,23 @@ namespace MatlabApp
             }
         }
 
-        private void NotifyFirebase(string path, Object value)
+        private async void NotifyFirebase(string path, Object value)
         {
             try
             {
                 if (value == null)
                 {
-                    this.client.Set(path, "{}");
+                    await this.client.SetAsync(path, "{}");
                 }
                 else
                 {
-                    this.client.Set(path, value);
+                    await this.client.SetAsync(path, value);
                 }
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine("*** EXCEPTION " + ex.Message + '\n' + ex.Source);
+                Console.Error.WriteLine("*** EXCEPTION in write to " + path + '\n' + ex.Message +
+                    "\nSOURCE:" + ex.Source);
             }
         }
 
