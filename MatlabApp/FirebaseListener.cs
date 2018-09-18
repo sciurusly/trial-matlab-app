@@ -36,6 +36,7 @@ namespace MatlabApp
         private int waitCount = 0;      // tick down when an update arrives
         private bool updateActive;      // is the model being updated? if so store any changes from firebase
         private bool resetActive;       // is the model being reset? if so store any changes from firebase
+        private bool revertActive;      // revert to the previous state.
         private Pending pending;        // simple linked list of pending changes.
         private Object _lock = new Object();
         /// <summary>
@@ -80,7 +81,7 @@ namespace MatlabApp
         }
 
 
-        private void SetFlag(bool update, bool reset)
+        private void SetFlag(bool update, bool reset, bool revert)
         {
             lock (this._lock)
             {
@@ -90,8 +91,14 @@ namespace MatlabApp
                     this.pending = null;
                 }
                 this.resetActive = reset;
+                this.revertActive = revert;
 
-                if (update || reset)
+                if (reset || revert)
+                {
+                    this.updateActive = false;
+                    this.waitCount = WAIT_MILLISECONDS;
+                }
+                else if (update)
                 {
                     this.waitCount = WAIT_MILLISECONDS;
                 }
@@ -154,6 +161,10 @@ namespace MatlabApp
                         {
                             this.RunUpdate();
                         }
+                        if (this.revertActive)
+                        {
+                            this.RunRevert();
+                        }
                     }
                     catch (Exception ex)
                     {
@@ -161,7 +172,7 @@ namespace MatlabApp
                     }
                     finally
                     {
-                        this.SetFlag(false, false);
+                        this.SetFlag(false, false, false);
                     }
                 }
             }
@@ -171,8 +182,13 @@ namespace MatlabApp
 
         private void RunNotify()
         {
+            var status = this.modelHandle.Status;
+            //if (status != null)
+            //{
+            //    this.revertActive = true;
+            //} 
             this.NotifyFirebase(STUDIO_CALLBACK, null);
-            this.NotifyFirebase(CANVAS_ERRORS, this.modelHandle.Status);
+            this.NotifyFirebase(CANVAS_ERRORS, status);
         }
 
         private void RunReset()
@@ -180,10 +196,14 @@ namespace MatlabApp
             Console.WriteLine("...reset running");
             this.GetModel().Reset();
             this.RunNotify();
-            this.NotifyFirebase("_studio", null);
             Console.WriteLine("...reset complete");
         }
 
+        private void RunRevert()
+        {
+            this.modelHandle.Revert();
+            this.RunNotify();
+        }
         private void RunUpdate()
         {
             Console.WriteLine("...update running");
@@ -292,7 +312,7 @@ namespace MatlabApp
                             if (this.lastRefresh != value)
                             {
                                 // notify we're ready
-                                this.SetFlag(true, false);
+                                this.SetFlag(true, false, false);
                                 this.updateWait.Set();
                                 this.lastRefresh = value;
                             }
@@ -304,7 +324,19 @@ namespace MatlabApp
                             Int32.TryParse(value, out isSet);
                             if (isSet != 0)
                             {
-                                this.SetFlag(true, true);
+                                this.SetFlag(true, true, false);
+                                this.updateWait.Set();
+                                this.lastRefresh = value;
+                            }
+                            return;
+                        }
+                    case "/revert":
+                        {
+                            var isSet = 0;
+                            Int32.TryParse(value, out isSet);
+                            if (isSet != 0)
+                            {
+                                this.SetFlag(true, false, true);
                                 this.updateWait.Set();
                                 this.lastRefresh = value;
                             }
