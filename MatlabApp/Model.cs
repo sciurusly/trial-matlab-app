@@ -97,6 +97,7 @@ namespace MatlabApp
                 this.updateState = false;
             }
             this.api.Update("clear");
+            this.api.WorkingState("save");
         }
 
         internal void Reset()
@@ -106,7 +107,19 @@ namespace MatlabApp
             this.Update(true);
         }
 
+        internal void Revert()
+        {
+            Console.WriteLine("  State revert");
+            this.Status = null;
+            if (this.updateState)
+            {
+                return; // nothing to do
+            }
+            this.api.WorkingState("load");
+        }
+
         public string State { get; private set; }
+
 
         internal void UpdateField(string block, string tunable, string value)
         {
@@ -131,8 +144,7 @@ namespace MatlabApp
                 {
                     bl.Update(this.api);
                 }
-                this.api.Update("update");
-
+                var ret = this.api.Update("update");
                 this.PostUpdate(force);
             }
             catch (Exception ex)
@@ -140,7 +152,6 @@ namespace MatlabApp
                 Console.Error.WriteLine("*** EXCEPTION " + ex.Message + '\n' + ex.Source);
                 this.StatusAdd("Error updating model");
             }
-            //this.StatusAdd("Failed!");
         }
 
         public string[] Status { get; private set; }
@@ -158,6 +169,7 @@ namespace MatlabApp
                 this.Status = list.ToArray();
             }
         }
+
     }
 
     internal class Block
