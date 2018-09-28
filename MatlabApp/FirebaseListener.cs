@@ -12,6 +12,7 @@ namespace MatlabApp
         private static readonly string CANVAS_LISTENING = CANVAS + "/listening";
         private static readonly string CANVAS_TWOWAY = CANVAS + "/twoway";
         private static readonly string CANVAS_ERRORS = CANVAS + "/errors";
+        private static readonly string CANVAS_WORKING = CANVAS + "/working";
         private static readonly string STUDIO = "/_studio";
         private static readonly string STUDIO_CALLBACK = STUDIO + "/callback";
 
@@ -22,16 +23,16 @@ namespace MatlabApp
 
         private FirebaseClient client;  // firebase client db
         private bool running;           // flag that the process is running
-        private EventWaitHandle updateWait; // wait notify
         private bool updateAll;         // flag to update all dashboards
         private string name;            // name of model to load
         private string state;           // state for model
         private Model modelHandle;      // reference to the model
         private string lastRefresh;     // the last refresh
-        private Thread updateThread;    // thread for updating the model;
 
-        private EventWaitHandle heartbeatWait;  // wait for heartbeat
-        private Thread heartbeatThread;         // thread for updating heartbeat;
+        private EventWaitHandle updateWait;         // wait to update the model
+        private Thread          updateThread;       // thread for updating the model
+        private EventWaitHandle heartbeatWait;      // wait for heartbeat
+        private Thread          heartbeatThread;    // thread for updating heartbeat
 
         private int waitCount = 0;      // tick down when an update arrives
         private bool updateActive;      // is the model being updated? if so store any changes from firebase
@@ -126,6 +127,7 @@ namespace MatlabApp
             }
             Console.WriteLine("End heartbeat thread");
         }
+
         // thread handler to update the model.
         internal void StartUpdateThread()
         {
@@ -151,6 +153,7 @@ namespace MatlabApp
                 if (this.running)
                 {
                     Console.WriteLine("  updating...");
+                    this.NotifyFirebase(FirebaseListener.CANVAS_WORKING, true);
                     try
                     {
                         if (this.resetActive)
@@ -173,6 +176,7 @@ namespace MatlabApp
                     finally
                     {
                         this.SetFlag(false, false, false);
+                        this.NotifyFirebase(FirebaseListener.CANVAS_WORKING, false);
                     }
                 }
             }
