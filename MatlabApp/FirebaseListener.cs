@@ -38,6 +38,7 @@ namespace MatlabApp
         private bool updateActive;      // is the model being updated? if so store any changes from firebase
         private bool resetActive;       // is the model being reset? if so store any changes from firebase
         private bool revertActive;      // revert to the previous state.
+        private volatile bool updatingModel;     // flag that the model update is active;
         private Pending pending;        // simple linked list of pending changes.
         private Object _lock = new Object();
         /// <summary>
@@ -122,6 +123,7 @@ namespace MatlabApp
             {
                 var heartbeat = DateTime.Now; // DateTime.Now.ToString("yyyyMMddTHHmmsszzz");
                 Console.WriteLine("...heartbeat " + heartbeat);
+                this.NotifyWorking(WorkingType.CHECK);
                 this.NotifyFirebase(CANVAS_LISTENING, heartbeat);
                 this.heartbeatWait.WaitOne(WAIT_HEARTBEAT);
             }
@@ -153,7 +155,7 @@ namespace MatlabApp
                 if (this.running)
                 {
                     Console.WriteLine("  updating...");
-                    this.NotifyFirebase(FirebaseListener.CANVAS_WORKING, true);
+                    this.NotifyWorking(WorkingType.SET);
                     try
                     {
                         if (this.resetActive)
@@ -176,7 +178,7 @@ namespace MatlabApp
                     finally
                     {
                         this.SetFlag(false, false, false);
-                        this.NotifyFirebase(FirebaseListener.CANVAS_WORKING, false);
+                        this.NotifyWorking(WorkingType.CLEAR);
                     }
                 }
             }
@@ -425,7 +427,7 @@ namespace MatlabApp
             catch (Exception ex)
             {
                 Console.Error.WriteLine("*** EXCEPTION in write to " + path + '\n' + ex.Message +
-                    "\nSOURCE:" + ex.Source);
+                    "\nSOURCE:" + ex.Source + "\nSTACK:\n" + ex.StackTrace);
             }
         }
 
@@ -447,6 +449,21 @@ namespace MatlabApp
             //    return;
             //}
             //this.NotifyFirebase("_error", msg);
+        }
+
+        private void NotifyWorking(WorkingType working)
+        {
+            if (working != WorkingType.CHECK)
+            {
+                this.updatingModel = (working == WorkingType.SET);
+            }
+                this.NotifyFirebase(FirebaseListener.CANVAS_WORKING, this.updatingModel);
+        }
+        private enum WorkingType
+        {
+            SET,
+            CLEAR,
+            CHECK
         }
     }
 
