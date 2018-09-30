@@ -135,8 +135,10 @@ namespace MatlabApp
         {
             Console.WriteLine("Start update thread");
             this.NotifyFirebase(CANVAS_TWOWAY, true);
+            this.NotifyFirebase(CANVAS_LISTENING, DateTime.Now);
             while (this.running)
             {
+                this.NotifyWorking(WorkingType.CLEAR);
                 Console.WriteLine("...update waiting");
                 this.updateWait.WaitOne();
 
@@ -178,7 +180,6 @@ namespace MatlabApp
                     finally
                     {
                         this.SetFlag(false, false, false);
-                        this.NotifyWorking(WorkingType.CLEAR);
                     }
                 }
             }
@@ -207,8 +208,10 @@ namespace MatlabApp
 
         private void RunRevert()
         {
+            Console.WriteLine("...revert running");
             this.modelHandle.Revert();
             this.RunNotify();
+            Console.WriteLine("...revert complete");
         }
         private void RunUpdate()
         {
@@ -411,8 +414,31 @@ namespace MatlabApp
             }
         }
 
-        private async void NotifyFirebase(string path, Object value)
+        private void NotifyFirebase(string path, Object value)
         {
+            Console.Out.WriteLine("    notify" + path);
+            try
+            {
+                if (value == null)
+                {
+                    this.client.Set(path, "{}");
+                }
+                else
+                {
+                    this.client.Set(path, value);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine("*** EXCEPTION in write to " + path + '\n' + ex.Message +
+                    "\nSOURCE:" + ex.Source + "\nSTACK:\n" + ex.StackTrace);
+                // give it another go:
+                this.NotifyFirebaseAsync(path, value);
+            }
+        }
+        private async void NotifyFirebaseAsync(string path, Object value)
+        {
+            Console.Out.WriteLine("    notifyasync" + path);
             try
             {
                 if (value == null)
@@ -426,7 +452,7 @@ namespace MatlabApp
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine("*** EXCEPTION in write to " + path + '\n' + ex.Message +
+                Console.Error.WriteLine("*** EXCEPTION in async write to " + path + '\n' + ex.Message +
                     "\nSOURCE:" + ex.Source + "\nSTACK:\n" + ex.StackTrace);
             }
         }
