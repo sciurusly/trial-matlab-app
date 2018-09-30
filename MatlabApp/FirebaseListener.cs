@@ -38,6 +38,7 @@ namespace MatlabApp
         private bool updateActive;      // is the model being updated? if so store any changes from firebase
         private bool resetActive;       // is the model being reset? if so store any changes from firebase
         private bool revertActive;      // revert to the previous state.
+        private volatile bool updatingModel;     // flag that the model update is active;
         private Pending pending;        // simple linked list of pending changes.
         private Object _lock = new Object();
         /// <summary>
@@ -122,6 +123,7 @@ namespace MatlabApp
             {
                 var heartbeat = DateTime.Now; // DateTime.Now.ToString("yyyyMMddTHHmmsszzz");
                 Console.WriteLine("...heartbeat " + heartbeat);
+                this.NotifyWorking(WorkingType.CHECK);
                 this.NotifyFirebase(CANVAS_LISTENING, heartbeat);
                 this.heartbeatWait.WaitOne(WAIT_HEARTBEAT);
             }
@@ -133,8 +135,10 @@ namespace MatlabApp
         {
             Console.WriteLine("Start update thread");
             this.NotifyFirebase(CANVAS_TWOWAY, true);
+            this.NotifyFirebase(CANVAS_LISTENING, DateTime.Now);
             while (this.running)
             {
+                this.NotifyWorking(WorkingType.CLEAR);
                 Console.WriteLine("...update waiting");
                 this.updateWait.WaitOne();
 
@@ -153,7 +157,7 @@ namespace MatlabApp
                 if (this.running)
                 {
                     Console.WriteLine("  updating...");
-                    this.NotifyFirebase(FirebaseListener.CANVAS_WORKING, true);
+                    this.NotifyWorking(WorkingType.SET);
                     try
                     {
                         if (this.resetActive)
@@ -176,7 +180,6 @@ namespace MatlabApp
                     finally
                     {
                         this.SetFlag(false, false, false);
-                        this.NotifyFirebase(FirebaseListener.CANVAS_WORKING, false);
                     }
                 }
             }
@@ -205,8 +208,10 @@ namespace MatlabApp
 
         private void RunRevert()
         {
+            Console.WriteLine("...revert running");
             this.modelHandle.Revert();
             this.RunNotify();
+            Console.WriteLine("...revert complete");
         }
         private void RunUpdate()
         {
@@ -409,8 +414,31 @@ namespace MatlabApp
             }
         }
 
-        private async void NotifyFirebase(string path, Object value)
+        private void NotifyFirebase(string path, Object value)
         {
+            Console.Out.WriteLine("    notify" + path);
+            try
+            {
+                if (value == null)
+                {
+                    this.client.Set(path, "{}");
+                }
+                else
+                {
+                    this.client.Set(path, value);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine("*** EXCEPTION in write to " + path + '\n' + ex.Message +
+                    "\nSOURCE:" + ex.Source + "\nSTACK:\n" + ex.StackTrace);
+                // give it another go:
+                this.NotifyFirebaseAsync(path, value);
+            }
+        }
+        private async void NotifyFirebaseAsync(string path, Object value)
+        {
+            Console.Out.WriteLine("    notifyasync" + path);
             try
             {
                 if (value == null)
@@ -424,8 +452,8 @@ namespace MatlabApp
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine("*** EXCEPTION in write to " + path + '\n' + ex.Message +
-                    "\nSOURCE:" + ex.Source);
+                Console.Error.WriteLine("*** EXCEPTION in async write to " + path + '\n' + ex.Message +
+                    "\nSOURCE:" + ex.Source + "\nSTACK:\n" + ex.StackTrace);
             }
         }
 
@@ -447,6 +475,22 @@ namespace MatlabApp
             //    return;
             //}
             //this.NotifyFirebase("_error", msg);
+        }
+
+        private void NotifyWorking(WorkingType working)
+        {
+            if (working != WorkingType.CHECK)
+            {
+                Console.WriteLine("    working " + working);
+                this.updatingModel = (working == WorkingType.SET);
+            }
+                this.NotifyFirebase(FirebaseListener.CANVAS_WORKING, this.updatingModel);
+        }
+        private enum WorkingType
+        {
+            SET,
+            CLEAR,
+            CHECK
         }
     }
 

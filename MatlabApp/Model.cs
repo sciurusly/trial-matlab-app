@@ -115,7 +115,9 @@ namespace MatlabApp
             {
                 return; // nothing to do
             }
+            Console.WriteLine("    >>> revert");
             this.api.WorkingState("load");
+            Console.WriteLine("    <<< revert");
         }
 
         public string State { get; private set; }
