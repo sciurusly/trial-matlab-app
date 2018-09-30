@@ -481,6 +481,7 @@ namespace MatlabApp
         {
             if (working != WorkingType.CHECK)
             {
+                Console.WriteLine("    working " + working);
                 this.updatingModel = (working == WorkingType.SET);
             }
                 this.NotifyFirebase(FirebaseListener.CANVAS_WORKING, this.updatingModel);
