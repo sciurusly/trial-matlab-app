@@ -51,33 +51,37 @@ namespace MatlabApp
                 return;
             }
             Console.WriteLine("      post update");
-            //refresh the external source
-            if (!String.IsNullOrEmpty(this.Reference))
-            {
-                this.api.Update("set", this.PostBlock, "Reference", this.Reference);
-                this.api.Update("update");
-            }
-            if (this.updateAll)
-            {
-                if (force)
-                {
-                    this.api.Refresh("#SaveExternal", 1);
-                }
-                else
-                {
-                    this.api.Refresh("#SaveExternal", "due");
-                }
-            }
-            else
-            {
-                this.api.Refresh(this.PostBlock, 1);
-            }
-            var status = this.api.Status();
 
+            var status = this.api.Status();
             if (!status.IsEmpty)
             {
                 this.StatusAdd("something went wrong");
             }
+            else
+            {
+                //refresh the external source
+                if (!String.IsNullOrEmpty(this.Reference))
+                {
+                    this.api.Update("set", this.PostBlock, "Reference", this.Reference);
+                    this.api.Update("update");
+                }
+                if (this.updateAll)
+                {
+                    if (force)
+                    {
+                        this.api.Refresh("#SaveExternal", 1);
+                    }
+                    else
+                    {
+                        this.api.Refresh("#SaveExternal", "due");
+                    }
+                }
+                else
+                {
+                    this.api.Refresh(this.PostBlock, 1);
+                }
+            }
+
             foreach (var bl in this.updateBlocks.Values)
             {
                 bl.PostUpdate();
@@ -135,6 +139,7 @@ namespace MatlabApp
             }
             bl.Set(tunable, value);
         }
+
         public void Update(bool force)
         {
             try
@@ -199,7 +204,7 @@ namespace MatlabApp
             Field val;
             if (!this.tunables.TryGetValue(name, out val))
             {
-                val=new Field(name);
+                val = new Field(name);
                 this.tunables[name] = val;
             }
             return val;
