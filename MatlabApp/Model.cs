@@ -25,6 +25,7 @@ namespace MatlabApp
         /// <param name="state"></param>
         internal Model(bool updateAll)
         {
+            Logger.Write(3, "Model." + (updateAll ? "All" : "Current"));
             this.api = new API();
             this.updateBlocks = new Dictionary<string, Block>();
             this.updateState = false;
@@ -33,6 +34,7 @@ namespace MatlabApp
 
         internal void LoadState(string name, string state)
         {
+            Logger.Write(4, "Model.LoadState." + name + '/' + state);
             this.Name = name;
             this.State = state;
             this.updateState = true;
@@ -50,7 +52,7 @@ namespace MatlabApp
             {
                 return;
             }
-            Console.WriteLine("      post update");
+            Logger.Write(3, "Model.PostUpdate");
 
             var status = this.api.Status();
             if (!status.IsEmpty)
@@ -62,6 +64,7 @@ namespace MatlabApp
                 //refresh the external source
                 if (!String.IsNullOrEmpty(this.Reference))
                 {
+                    Logger.Write(6, "Model.PostUpdate.Update." + this.PostBlock + '.' + this.Reference);
                     this.api.Update("set", this.PostBlock, "Reference", this.Reference);
                     this.api.Update("update");
                 }
@@ -69,15 +72,18 @@ namespace MatlabApp
                 {
                     if (force)
                     {
+                        Logger.Write(6, "Model.PostUpdate.Refresh.All.Force");
                         this.api.Refresh("#SaveExternal", 1);
                     }
                     else
                     {
+                        Logger.Write(6, "Model.PostUpdate.Refresh.All.Due");
                         this.api.Refresh("#SaveExternal", "due");
                     }
                 }
                 else
                 {
+                    Logger.Write(6, "Model.PostUpdate.Refresh.Current");
                     this.api.Refresh(this.PostBlock, 1);
                 }
             }
@@ -88,40 +94,40 @@ namespace MatlabApp
             }
         }
 
-
         private void PreUpdate()
         {
             // clear status;
             this.Status = null;
-            Console.WriteLine("      pre update");
+            Logger.Write(3, "Model.PreUpdate");
             if (this.updateState)
             {
-                Console.WriteLine("        LoadState");
+                Logger.Write(3, "Model.PreUpdate.LoadState");
                 this.api.LoadState(this.Name, this.State);
                 this.updateState = false;
             }
+            Logger.Write(4, "Model.PreUpdate.Clear");
             this.api.Update("clear");
+            Logger.Write(4, "Model.PreUpdate.WorkingState.Save");
             this.api.WorkingState("save");
         }
 
         internal void Reset()
         {
-            Console.WriteLine("  State reload");
+            Logger.Write(4, "Model.Reset");
             this.updateState = true;
             this.Update(true);
         }
 
         internal void Revert()
         {
-            Console.WriteLine("  State revert");
-            this.Status = null;
+            Logger.Write(4, "Model.Revert");
             if (this.updateState)
             {
                 return; // nothing to do
             }
-            Console.WriteLine("    >>> revert");
+            Logger.Write(5, "Model.Revert.WorkingState.Load");
             this.api.WorkingState("load");
-            Console.WriteLine("    <<< revert");
+            Logger.Write(5, "Model.Revert.WorkingState.Ready");
         }
 
         public string State { get; private set; }
@@ -129,7 +135,7 @@ namespace MatlabApp
 
         internal void UpdateField(string block, string tunable, string value)
         {
-            Console.WriteLine("UpdateField " + block + "." + tunable + " = " + value);
+            Logger.Write(7, "Model.UpdateField " + block + "." + tunable + " = " + value);
             Block bl;
             var newBlock = !this.updateBlocks.TryGetValue(block, out bl);
             if (newBlock)
@@ -144,7 +150,7 @@ namespace MatlabApp
         {
             try
             {
-                Console.WriteLine("    Update for " + this.Name + '@' + this.State);
+                Logger.Write(3, "Model.Update." + this.Name + '/' + this.State);
 
                 this.PreUpdate();
                 foreach (var bl in this.updateBlocks.Values)
@@ -152,19 +158,22 @@ namespace MatlabApp
                     bl.Update(this.api);
                 }
                 var ret = this.api.Update("update");
+                
                 this.PostUpdate(force);
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine("*** EXCEPTION " + ex.Message + '\n' + ex.Source);
-                this.StatusAdd("Error updating model");
+                Logger.Error("Update model", ex);
+                this.StatusAdd("Error: " + ex.Message);
             }
+            Logger.Write(3, "Model.Update.Done");
         }
 
         public string[] Status { get; private set; }
 
         private void StatusAdd(string message)
         {
+            Logger.Write(7, message);
             if (this.Status == null)
             {
                 this.Status = new string[] { message };
@@ -176,7 +185,6 @@ namespace MatlabApp
                 this.Status = list.ToArray();
             }
         }
-
     }
 
     internal class Block
@@ -185,6 +193,7 @@ namespace MatlabApp
 
         internal Block(string name)
         {
+            Logger.Write(7, "Block." + name);
             this.Name = name;
         }
 
@@ -215,16 +224,16 @@ namespace MatlabApp
             {
                 return;
             }
-            Console.WriteLine("      update block " + this.Name);
+            Logger.Write(7, "Block.Update." + this.Name);
             foreach (var field in this.tunables.Keys)
             {
-                Console.WriteLine("        " + field + '=' + this.Get(field));
                 this.Field(field).Update(api, this.Name);
             }
         }
 
         internal void PostUpdate()
         {
+            Logger.Write(7, "Block.PostUpdate." + this.Name);
             this.tunables.Clear();
         }
     }
@@ -233,10 +242,11 @@ namespace MatlabApp
     {
         internal Field(string name)
         {
+            Logger.Write(8, "Field." + name);
             this.Name = name;
         }
         internal String Name { get; }
-        internal String Value { get; set; }
+        internal String Value { get; private set; }
 
         internal void Set(string value)
         {
@@ -244,6 +254,7 @@ namespace MatlabApp
         }
         internal void Update(API api, String block)
         {
+            Logger.Write(9, "Field.Update." + this.Name + '=' + this.Value);
             api.Update("set", block, this.Name, this.Value);
         }
     }
