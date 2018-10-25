@@ -192,9 +192,9 @@ namespace MatlabApp
             {
                 this.sender.AddMessage(Studio.CANVAS_ERRORS, this.reply);
             }
+            this.IsWorking = false;
             this.replyReceived = false;
             this.updateType = ModelUpdateType.None;
-            this.IsWorking = false;
         }
 
         internal void Start()
