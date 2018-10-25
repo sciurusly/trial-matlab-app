@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Threading;
+using Sciurus.FinancialCanvas.Logging;
 
 namespace MatlabApp
 {
@@ -16,8 +17,8 @@ namespace MatlabApp
         private string lastRefresh;     // the last refresh
         private int waitCount;
         private bool updateAll;
-        private EventWaitHandle modelWait;  // wait to send heartbeat
-        private Thread modelThread;         // thread for sending heartbeat
+        private EventWaitHandle modelWait;  // wait to update the model
+        private Thread modelThread;         // thread for updating the model
         private bool running;
 
         private volatile bool _working = false;
@@ -30,26 +31,31 @@ namespace MatlabApp
 
             private set
             {
+                Logger.Log.Write(3, "ModelCaller.IsWorking:" + value);
                 this._working = value;
-                this.sender.AddMessage(Studio.CANVAS_WORKING, this._working);
-                Logger.Write(4, "ModelCaller.IsWorking=" + this._working);
+                this.process.NotifyHeartBeat();
             }
         }
         private ModelUpdateType updateType;
         private Message message;
         private object _lock = new object();
+        private bool success;
+        private string[] reply;
+        private bool replyReceived;
+        private StudioListener process;
 
-        internal ModelCaller(StudioSender sender, bool updateAll)
+        internal ModelCaller(StudioListener process, StudioSender sender, int port, bool updateAll)
         {
-            Logger.Write(1, "ModelCaller");
+            Logger.Log.Write(1, "ModelCaller");
+            this.process = process;
             this.sender = sender;
             this.updateAll = updateAll;
-            this.model = new Model(this.updateAll);
+            this.model = new Model(this, port, this.updateAll);
         }
 
         internal void AddMessage(string key, string value)
         {
-            Logger.Write(6, "ModelCaller.AddMessage." + key + '.' + value);
+            Logger.Log.Write(6, "ModelCaller.AddMessage:" + key + '.' + value);
             var msg = new Message(key, value);
             lock(this._lock)
             {
@@ -91,10 +97,11 @@ namespace MatlabApp
             {
                 if (this.message == null)
                 {
+                    Logger.Log.Write(6, "ModelCaller.PopMessage:[null]");
                     return null;
                 }
                 var msg = this.message;
-                Logger.Write(6, "ModelCaller.PopMessage." + msg.Key);
+                Logger.Log.Write(6, "ModelCaller.PopMessage:" + msg.Key);
                 this.message = msg.Next;
                 return msg;
             }
@@ -107,7 +114,7 @@ namespace MatlabApp
             {
                 return false;
             }
-            Logger.Write(4, "ModelCaller.ProcessMessage.Start");
+            Logger.Log.Write(4, "ModelCaller.ProcessMessage.Start");
             while (msg != null)
             {
                 this.UpdateField(msg.Key, msg.Value);
@@ -124,16 +131,16 @@ namespace MatlabApp
                 }
             }
             this.waitCount = 0;
-            Logger.Write(4, "ModelCaller.ProcessMessage.Done");
-            return true;
+            Logger.Log.Write(4, "ModelCaller.ProcessMessage.Done");
+            return this.updateType != ModelUpdateType.None;
         }
 
         private void ProcessUpdate()
         {
             // we need to update the model in some way;
-            Logger.Write(3, "ModelCaller.ProcessUpdate." + this.updateType);
+            Logger.Log.Write(3, "ModelCaller.ProcessUpdate:" + this.updateType);
             this.IsWorking = true;
-
+            this.replyReceived = false;
             var model = this.GetModel();
             switch (this.updateType)
             {
@@ -154,21 +161,48 @@ namespace MatlabApp
                         break;
                     }
             }
+            // this is an assync call, we need to wait for the callback:
             var status = this.model.Status;
-            this.sender.AddMessagePending(Studio.STUDIO_CALLBACK, null);
-            this.sender.AddMessagePending(Studio.CANVAS_ERRORS, status);
-            this.sender.Notify();
+            Logger.Log.Write(3, "ModelCaller.ProcessUpdate.Done");
+        }
 
+        internal void NotifyReply(bool success, string[] reply)
+        {
+            this.success = success;
+            this.reply = reply;
+            this.replyReceived = true;
+            this.modelWait.Set();
+        }
+        /// <summary>
+        /// Process the reply from canvas
+        /// </summary>
+        /// <returns></returns>
+        private void ProcessReply()
+        {
+            if (!this.replyReceived)
+            {
+                return;
+            }
+            this.sender.AddMessage(Studio.STUDIO_CALLBACK, null);
+            if (this.success)
+            {
+                this.sender.AddMessage(Studio.CANVAS_ERRORS, null);
+            }
+            else
+            {
+                this.sender.AddMessage(Studio.CANVAS_ERRORS, this.reply);
+            }
+            this.replyReceived = false;
             this.updateType = ModelUpdateType.None;
             this.IsWorking = false;
-            Logger.Write(3, "ModelCaller.ProcessUpdate.Done");
         }
+
         internal void Start()
         {
-            Logger.Write(2, "ModelCaller.Start");
+            Logger.Log.Write(2, "ModelCaller.Start");
             this.message = null;
             this.running = true;
-
+            this.model.Start();
             this.modelWait= new AutoResetEvent(false);
             this.modelThread = new Thread(UpdateModel);
             this.modelThread.Start();
@@ -176,8 +210,9 @@ namespace MatlabApp
 
         internal void Stop()
         {
-            Logger.Write(2, "ModelCaller.Stop");
+            Logger.Log.Write(2, "ModelCaller.Stop");
             this.running = false;
+            this.model.Stop();
             this.modelWait.Set();
         }
 
@@ -185,7 +220,7 @@ namespace MatlabApp
         {
             string value = obj == null ? null : obj.ToString();
 
-            Logger.Write(6, "ModelCaller.UpdateField" + path + "=" + value);
+            Logger.Log.Write(6, "ModelCaller.UpdateField:" + path + "=" + value);
             try
             {
 
@@ -241,7 +276,7 @@ namespace MatlabApp
                 var parts = path.Substring(1).Split('/');
                 if (parts.Length != 3 || parts[0] != "update")
                 {
-                    Logger.Write(0,"*** EXCEPTION Unhandled field " + path);
+                    Logger.Log.Write(0,"*** EXCEPTION Unhandled field " + path);
                     return;
                 }
                 var block = parts[1];
@@ -250,11 +285,11 @@ namespace MatlabApp
                 var model = this.GetModel();
                 model.UpdateField(block, tunable, value);
                 this.waitCount = Studio.WAIT_MILLISECONDS;
-                Logger.Write(6, "ModelCaller.UpdateField.Waiting");
+                Logger.Log.Write(6, "ModelCaller.UpdateField.Waiting");
             }
             catch (Exception ex)
             {
-                Logger.Error("ModelCaller.UpdateField", ex);
+                Logger.Log.Error("ModelCaller.UpdateField", ex);
             }
         }
 
@@ -263,22 +298,35 @@ namespace MatlabApp
             this.IsWorking = false;
             this.updateType = ModelUpdateType.None;
             this.waitCount = 0;
-            Logger.Write(3, "ModelCaller.UpdateModel.Start");
+            Logger.Log.Write(3, "ModelCaller.UpdateModel.Start");
             while (this.running)
             {
-                // process any changes
-                if (this.ProcessMessage())
+                var wait = true;
+                if (this.IsWorking)
                 {
-                    this.ProcessUpdate();
+                    Logger.Log.Write(9, "ModelCaller.UpdateModel.Reply");
+                    this.ProcessReply();
                 }
                 else
                 {
+                    // process any changes
+                    Logger.Log.Write(9, "ModelCaller.UpdateModel.Message");
+                    if (this.ProcessMessage())
+                    {
+                        Logger.Log.Write(9, "ModelCaller.UpdateModel.Update");
+                        this.ProcessUpdate();
+                        wait = false;
+                    }
+                }
+                if (wait)
+                {
                     // wait for next notify
-                    Logger.Write(3, "ModelCaller.UpdateModel.Wait");
+                    Logger.Log.Write(9, "ModelCaller.UpdateModel.Wait");
                     this.modelWait.WaitOne();
+                    Logger.Log.Write(9, "ModelCaller.UpdateModel.Wake");
                 }
             }
-            Logger.Write(3, "ModelCaller.UpdateModel.Done");
+            Logger.Log.Write(3, "ModelCaller.UpdateModel.Done");
         }
 
         private enum ModelUpdateType

@@ -1,6 +1,8 @@
 ﻿using System;
 using System.Threading;
 using FireSharp.EventStreaming;
+using Sciurus.FinancialCanvas.Logging;
+using System.Net.Http;
 
 namespace MatlabApp
 {
@@ -16,7 +18,7 @@ namespace MatlabApp
 
         internal StudioReceiver(ModelCaller model, string name, string secret) : base(name, secret)
         {
-            Logger.Write(1, "StudioReceiver." + name);
+            Logger.Log.Write(1, "StudioReceiver." + name);
             this.model = model;
         }
 
@@ -30,7 +32,7 @@ namespace MatlabApp
             {
                 return;
             }
-            Logger.Write(6, "StudioReceiver.DataInsert." + args.Path + "=" + args.Data);
+            Logger.Log.Write(6, "StudioReceiver.DataInsert:" + args.Path + "=" + args.Data);
             this.model.AddMessage(args.Path, args.Data);
         }
 
@@ -44,23 +46,30 @@ namespace MatlabApp
             {
                 return;
             }
-            Logger.Write(6, "StudioReceiver.DataUpdate." + args.Path + "=" + args.Data);
+            Logger.Log.Write(6, "StudioReceiver.DataUpdate:" + args.Path + "=" + args.Data);
             this.model.AddMessage(args.Path, args.Data);
         }
 
         private async void Listen()
         {
-            Logger.Write(4, "StudioReceiver.Listen." + Studio.STUDIO_CALLBACK);
+            Logger.Log.Write(4, "StudioReceiver.Listen:" + Studio.STUDIO_CALLBACK);
             // read everything from Firebase as the base state:
-            var response = await this.client.OnAsync(Studio.STUDIO_CALLBACK,
-                (sender, args, context) => { this.DataInsert(args); },
-                (sender, args, context) => { this.DataUpdate(args); },
-                (sender, args, context) => { });
+            try
+            {
+                var response = await this.client.OnAsync(Studio.STUDIO_CALLBACK,
+                    (sender, args, context) => { this.DataInsert(args); },
+                    (sender, args, context) => { this.DataUpdate(args); },
+                    (sender, args, context) => { });
+            }
+            catch(HttpRequestException ex)
+            {
+                Logger.Log.Error("StudioReceiver.Listen", ex);
+            }
         }
 
         internal void Start()
         {
-            Logger.Write(2, "StudioReceiver.Start");
+            Logger.Log.Write(2, "StudioReceiver.Start");
             this.running = true;
             this.studioThread = new Thread(StudioCallback);
             this.studioThread.Start();
@@ -68,14 +77,15 @@ namespace MatlabApp
 
         private void StudioCallback()
         {
-            Logger.Write(3, "StudioReceiver.StudioCallback");
+            Logger.Log.Write(3, "StudioReceiver.StudioCallback");
             this.Listen();
         }
 
         internal void Stop()
         {
-            Logger.Write(2, "StudioReceiver.Stop");
+            Logger.Log.Write(2, "StudioReceiver.Stop");
             this.running = false;
+            //this.studioThread.Abort();
             this.client = null;
         }
     }

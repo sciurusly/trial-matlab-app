@@ -18,9 +18,10 @@
 
         // time to wait between heartbeats
         internal static readonly int WAIT_HEARTBEAT = 60000;
+        internal static readonly int WAIT_SHORT_HEARTBEAT = 5000;
 
         // wait between last message and processing:
-        internal static readonly int WAIT_MILLISECONDS = 250;
-        internal static readonly int WAIT_TICKDOWN = 50;
+        internal static readonly int WAIT_MILLISECONDS = 500;
+        internal static readonly int WAIT_TICKDOWN = 100;
     }
 }

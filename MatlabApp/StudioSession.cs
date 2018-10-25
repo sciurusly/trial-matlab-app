@@ -1,5 +1,6 @@
 ﻿using FireSharp;
 using FireSharp.Config;
+using Sciurus.FinancialCanvas.Logging;
 
 namespace MatlabApp
 {
@@ -13,7 +14,7 @@ namespace MatlabApp
         protected StudioSession(string name, string secret)
         {
             var path = "https://" + name + ".firebaseio.com/";
-            Logger.Write(6, "StudioSession." + path);
+            Logger.Log.Write(6, "StudioSession." + path);
             var config = new FirebaseConfig
             {
                 BasePath = path,

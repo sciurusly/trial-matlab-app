@@ -1,6 +1,5 @@
-﻿using System;
-using FireSharp;
-using System.Threading;
+﻿using System.Threading;
+using Sciurus.FinancialCanvas.Logging;
 
 namespace MatlabApp
 {
@@ -19,21 +18,14 @@ namespace MatlabApp
 
         internal StudioSender(string name, string secret) : base(name, secret)
         {
-            Logger.Write(1, "StudioSender." + name);
+            Logger.Log.Write(1, "StudioSender." + name);
         }
 
         internal void AddMessage(string key, object value)
         {
-            Logger.Write(5, "StudioSender.AddMessage." + key);
-            this.AddMessagePending(key, value);
-            this.Notify();
-        }
-
-        internal void AddMessagePending(string key, object value)
-        {
-            Logger.Write(6, "StudioSender.AddMessagePending." + key);
+            Logger.Log.Write(5, "StudioSender.AddMessage." + key);
             var msg = new Message(key, value);
-            lock(this._lock)
+            lock (this._lock)
             {
                 if (this.message == null)
                 {
@@ -44,15 +36,6 @@ namespace MatlabApp
                     this.message.Add(msg);
                 }
             }
-        }
-
-        /// <summary>
-        /// Notify the sender that it needs to check it's messages.
-        /// The calling process can submit messages, but must then call notify to start sending then
-        /// </summary>
-        internal void Notify()
-        {
-            Logger.Write(4, "StudioSender.Notify");
             this.updateWait.Set();
         }
 
@@ -68,6 +51,12 @@ namespace MatlabApp
                 // take the first one
                 msg = this.message;
                 this.message = msg.Next;
+                if (msg.Key == "~internal")
+                {
+                    // should always be "stop"!
+                    this.running = (msg.Value.ToString() != "stop");
+                    return this.running;
+                }
                 msg.Send(this.client);
                 return true;
             }
@@ -96,7 +85,7 @@ namespace MatlabApp
 
         internal void Start()
         {
-            Logger.Write(2, "StudioSender.Start");
+            Logger.Log.Write(2, "StudioSender.Start");
             this.message = null;
             this.running = true;
 
@@ -107,7 +96,7 @@ namespace MatlabApp
 
         private void UpdateStudio()
         {
-            Logger.Write(3, "StudioSender.UpdateStudio.Start");
+            Logger.Log.Write(3, "StudioSender.UpdateStudio.Start");
             while (this.Running)
             {
                 if (!this.ProcessMessage())
@@ -120,15 +109,14 @@ namespace MatlabApp
                     }
                 }
             }
-            Logger.Write(3, "StudioSender.UpdateStudio.Done");
+            Logger.Log.Write(3, "StudioSender.UpdateStudio.Done");
             this.client = null;
         }
 
         internal void Stop()
         {
-            Logger.Write(2, "StudioSender.Stop");
-            this.running = false;
-            this.Notify();
+            Logger.Log.Write(2, "StudioSender.Stop");
+            this.AddMessage("~internal", "stop");
         }
     }
 }

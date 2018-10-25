@@ -1,6 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
-using Scirius.FinancialCanvas;
+using Sciurus.FinancialCanvas.API;
+using Sciurus.FinancialCanvas.Logging;
+
+//Scirius.FinancialCanvas.API;
 
 namespace MatlabApp
 {
@@ -9,8 +12,9 @@ namespace MatlabApp
     /// </summary>
     internal class Model
     {
-        /// <summary>keep the api instance</summary>
-        private API api;
+        private ModelCaller caller;
+        /// <summary>keep the client instance</summary>
+        private ClientConnection client;
         private Dictionary<String, Block> updateBlocks; // if a field changes, update the tunables in the block
 
         // do we need to update the loaded state file?
@@ -20,13 +24,14 @@ namespace MatlabApp
         /// Create the model
         /// Real world this would need to be a singleton as API supports only a single state open at a time.
         /// </summary>
-        /// <param name="api"></param>
+        /// <param name="client"></param>
         /// <param name="name"></param>
         /// <param name="state"></param>
-        internal Model(bool updateAll)
+        internal Model(ModelCaller caller, int port, bool updateAll)
         {
-            Logger.Write(3, "Model." + (updateAll ? "All" : "Current"));
-            this.api = new API();
+            Logger.Log.Write(3, "Model:" + (updateAll ? "All" : "Current"));
+            this.caller = caller;
+            this.client = new ClientConnection(this, port);
             this.updateBlocks = new Dictionary<string, Block>();
             this.updateState = false;
             this.updateAll = updateAll;
@@ -34,7 +39,7 @@ namespace MatlabApp
 
         internal void LoadState(string name, string state)
         {
-            Logger.Write(4, "Model.LoadState." + name + '/' + state);
+            Logger.Log.Write(4, "Model.LoadState." + name + '/' + state);
             this.Name = name;
             this.State = state;
             this.updateState = true;
@@ -52,82 +57,78 @@ namespace MatlabApp
             {
                 return;
             }
-            Logger.Write(3, "Model.PostUpdate");
+            Logger.Log.Write(3, "Model.PostUpdate");
 
-            var status = this.api.Status();
-            if (!status.IsEmpty)
+            //refresh the external source
+            if (!String.IsNullOrEmpty(this.Reference))
             {
-                this.StatusAdd("something went wrong");
+                Logger.Log.Write(6, "Model.PostUpdate.Update." + this.PostBlock + '.' + this.Reference);
+                var bl = new Block(this.PostBlock);
+                bl.Set("Reference", this.Reference);
+
+                this.client.UpdateBlock(bl);
             }
-            else
+            if (this.updateAll)
             {
-                //refresh the external source
-                if (!String.IsNullOrEmpty(this.Reference))
+                if (force)
                 {
-                    Logger.Write(6, "Model.PostUpdate.Update." + this.PostBlock + '.' + this.Reference);
-                    this.api.Update("set", this.PostBlock, "Reference", this.Reference);
-                    this.api.Update("update");
-                }
-                if (this.updateAll)
-                {
-                    if (force)
-                    {
-                        Logger.Write(6, "Model.PostUpdate.Refresh.All.Force");
-                        this.api.Refresh("#SaveExternal", 1);
-                    }
-                    else
-                    {
-                        Logger.Write(6, "Model.PostUpdate.Refresh.All.Due");
-                        this.api.Refresh("#SaveExternal", "due");
-                    }
+                    Logger.Log.Write(6, "Model.PostUpdate.Refresh.All.Force");
+                    this.client.Refresh("#SaveExternal", true);
                 }
                 else
                 {
-                    Logger.Write(6, "Model.PostUpdate.Refresh.Current");
-                    this.api.Refresh(this.PostBlock, 1);
+                    Logger.Log.Write(6, "Model.PostUpdate.Refresh.All.Due");
+                    this.client.Refresh("#SaveExternal", "due");
                 }
+            }
+            else
+            {
+                Logger.Log.Write(6, "Model.PostUpdate.Refresh.Current");
+                this.client.Refresh(this.PostBlock, true);
             }
 
             foreach (var bl in this.updateBlocks.Values)
             {
+                // tidy up after the update
                 bl.PostUpdate();
             }
         }
 
         private void PreUpdate()
         {
-            // clear status;
-            this.Status = null;
-            Logger.Write(3, "Model.PreUpdate");
+            Logger.Log.Write(3, "Model.PreUpdate");
             if (this.updateState)
             {
-                Logger.Write(3, "Model.PreUpdate.LoadState");
-                this.api.LoadState(this.Name, this.State);
-                this.updateState = false;
+                Logger.Log.Write(3, "Model.PreUpdate.LoadState");
+                this.client.LoadState(this.Name, this.State);
             }
-            Logger.Write(4, "Model.PreUpdate.Clear");
-            this.api.Update("clear");
-            Logger.Write(4, "Model.PreUpdate.WorkingState.Save");
-            this.api.WorkingState("save");
+            else
+            {
+                this.client.SaveWorkingState();
+            }
         }
 
         internal void Reset()
         {
-            Logger.Write(4, "Model.Reset");
-            this.updateState = true;
-            this.Update(true);
+                Logger.Log.Write(4, "Model.Reset");
+                this.updateState = true;
+                this.Update(true);
         }
 
         internal void Revert()
         {
-            Logger.Write(4, "Model.Revert");
-            if (this.updateState)
+            try
             {
-                return; // nothing to do
+                Logger.Log.Write(4, "Model.Revert");
+                this.client.LoadWorkingState();
+                this.client.SendActions();
             }
-            Logger.Write(5, "Model.Revert.WorkingState.Load");
-            this.api.WorkingState("load");
-            Logger.Write(5, "Model.Revert.WorkingState.Ready");
+            catch (Exception ex)
+            {
+                Logger.Log.Error("Model.Revert", ex);
+                this.StatusAdd("Error: " + ex.Message);
+            }
+            Logger.Log.Write(3, "Model.Revert.Done");
         }
 
         public string State { get; private set; }
@@ -135,7 +136,7 @@ namespace MatlabApp
 
         internal void UpdateField(string block, string tunable, string value)
         {
-            Logger.Write(7, "Model.UpdateField " + block + "." + tunable + " = " + value);
+            Logger.Log.Write(7, "Model.UpdateField " + block + "." + tunable + " = " + value);
             Block bl;
             var newBlock = !this.updateBlocks.TryGetValue(block, out bl);
             if (newBlock)
@@ -150,30 +151,38 @@ namespace MatlabApp
         {
             try
             {
-                Logger.Write(3, "Model.Update." + this.Name + '/' + this.State);
+                Logger.Log.Write(3, "Model.Update." + this.Name + '/' + this.State);
 
+                // we don't actually read or write anything we just work out the actions to send to the api.
+                this.client.ClearActions();
                 this.PreUpdate();
+
                 foreach (var bl in this.updateBlocks.Values)
                 {
-                    bl.Update(this.api);
+                    this.client.UpdateBlock(bl);
                 }
-                var ret = this.api.Update("update");
-                
                 this.PostUpdate(force);
+
+                this.client.SendActions();
             }
             catch (Exception ex)
             {
-                Logger.Error("Update model", ex);
+                Logger.Log.Error("Update model", ex);
                 this.StatusAdd("Error: " + ex.Message);
             }
-            Logger.Write(3, "Model.Update.Done");
+            Logger.Log.Write(3, "Model.Update.Done");
         }
 
         public string[] Status { get; private set; }
 
+        internal void Start()
+        {
+            this.client.Start();
+        }
+
         private void StatusAdd(string message)
         {
-            Logger.Write(7, message);
+            Logger.Log.Write(7, message);
             if (this.Status == null)
             {
                 this.Status = new string[] { message };
@@ -185,15 +194,30 @@ namespace MatlabApp
                 this.Status = list.ToArray();
             }
         }
+
+        internal void Stop()
+        {
+            this.client.Stop();
+        }
+
+        internal void NotifyReply(bool success, string[] reply)
+        {
+            Logger.Log.Write(3, "Model.NotifyReply:" + success);
+            if (success)
+            {
+                this.updateState = false;
+            }
+            this.caller.NotifyReply(success, reply);
+        }
     }
 
     internal class Block
     {
-        private Dictionary<string, Field> tunables = new Dictionary<string, Field>();
+        internal Dictionary<string, Field> tunables = new Dictionary<string, Field>();
 
         internal Block(string name)
         {
-            Logger.Write(7, "Block." + name);
+            Logger.Log.Write(7, "Block." + name);
             this.Name = name;
         }
 
@@ -218,22 +242,10 @@ namespace MatlabApp
             }
             return val;
         }
-        internal void Update(API api)
-        {
-            if (this.tunables.Count == 0)
-            {
-                return;
-            }
-            Logger.Write(7, "Block.Update." + this.Name);
-            foreach (var field in this.tunables.Keys)
-            {
-                this.Field(field).Update(api, this.Name);
-            }
-        }
 
         internal void PostUpdate()
         {
-            Logger.Write(7, "Block.PostUpdate." + this.Name);
+            Logger.Log.Write(7, "Block.PostUpdate." + this.Name);
             this.tunables.Clear();
         }
     }
@@ -242,7 +254,7 @@ namespace MatlabApp
     {
         internal Field(string name)
         {
-            Logger.Write(8, "Field." + name);
+            Logger.Log.Write(8, "Field." + name);
             this.Name = name;
         }
         internal String Name { get; }
@@ -251,11 +263,6 @@ namespace MatlabApp
         internal void Set(string value)
         {
             this.Value = value;
-        }
-        internal void Update(API api, String block)
-        {
-            Logger.Write(9, "Field.Update." + this.Name + '=' + this.Value);
-            api.Update("set", block, this.Name, this.Value);
         }
     }
 }

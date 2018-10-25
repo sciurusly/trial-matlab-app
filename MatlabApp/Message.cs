@@ -1,5 +1,6 @@
 ﻿using System;
 using FireSharp;
+using Sciurus.FinancialCanvas.Logging;
 
 namespace MatlabApp
 {
@@ -15,7 +16,7 @@ namespace MatlabApp
 
         internal Message(string key, object value)
         {
-            Logger.Write(8, "Message." + key);
+            Logger.Log.Write(8, "Message." + key);
             this.Key = key;
             this.Value = value;
             this.Next = null;
@@ -25,7 +26,7 @@ namespace MatlabApp
         {
             if (this.Next == null)
             {
-                Logger.Write(9, "Message.Add." + this.Key + '.' + add.Key);
+                Logger.Log.Write(9, "Message.Add." + this.Key + '.' + add.Key);
                 this.Next = add;
             }
             else
@@ -38,15 +39,16 @@ namespace MatlabApp
         {
             try
             {
-                Logger.Write(9, "Message.Send." + this.Key);
-                client.Set(this.Key,
+                Logger.Log.Write(9, "Message.Send:" + this.Key);
+                var result = client.Set(this.Key,
                     this.Value == null ? "{}" : this.Value);
-                Logger.Write(9, "Message.Send.Done");
+                
+                Logger.Log.Write(9, "Message.Send.Done:" + result.StatusCode);
             }
             catch (Exception ex)
             {
                 // this should not ever happen ??
-                Logger.Error("write to " + this.Key, ex);
+                Logger.Log.Error("Message.Send:" + this.Key, ex);
             }
         }
     }
